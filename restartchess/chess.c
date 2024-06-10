@@ -13,17 +13,22 @@
 
 #define WINDOW_WIDTH 800
 #define WINDOW_HEIGHT 800
-#define BOARD_SIZE 5
-#define TILE_SIZE 45
+#define BOARD_SIZE 8
+#define TILE_SIZE 46
 #define WIN_CONDITION 5
+#define ANIMATION_SPEED 1
+#define NUM_CLOUDS 3
+#define FADE_OUT_SPEED 0.01
 
-// Click 구조체 정의: 클릭 위치와 돌 색상 저장
 typedef struct {
     int x, y;
     bool isBlack;
 } Click;
 
-// 텍스처 로드 함수: 파일 경로와 렌더러를 받아 텍스처 생성
+typedef struct {
+    int x, y, w, h;
+} Button;
+
 SDL_Texture* loadTexture(const char* file, SDL_Renderer* renderer) {
     SDL_Surface* loadedSurface = IMG_Load(file);
     if (!loadedSurface) {
@@ -35,58 +40,82 @@ SDL_Texture* loadTexture(const char* file, SDL_Renderer* renderer) {
     return texture;
 }
 
-// 텍스처 렌더링 함수: 텍스처를 주어진 위치에 렌더링
 void renderTexture(SDL_Texture* tex, SDL_Renderer* renderer, int x, int y) {
     SDL_Rect dst = { x, y, 0, 0 };
     SDL_QueryTexture(tex, NULL, NULL, &dst.w, &dst.h);
     SDL_RenderCopy(renderer, tex, NULL, &dst);
 }
 
-// 보드 렌더링 함수: 보드 텍스처를 로드하여 화면에 렌더링
-void renderBoard(SDL_Renderer* renderer) {
-    SDL_Texture* boardTexture = loadTexture("C:\\Users\\user\\Desktop\\pan.png", renderer);
-    if (boardTexture) {
-        renderTexture(boardTexture, renderer, WINDOW_WIDTH / 500 - TILE_SIZE * BOARD_SIZE / 200, WINDOW_HEIGHT / 500 - TILE_SIZE * BOARD_SIZE / 200);
-        SDL_DestroyTexture(boardTexture);
-    }
+void renderBoard(SDL_Renderer* renderer, SDL_Texture* boardTexture) {
+    renderTexture(boardTexture, renderer, WINDOW_WIDTH / 500 - TILE_SIZE * BOARD_SIZE / 200, WINDOW_HEIGHT / 500 - TILE_SIZE * BOARD_SIZE / 200);
 }
 
-// 승리 조건 확인 함수: 클릭 기록과 현재 위치를 기반으로 승리 여부 확인
-bool checkWinCondition(Click clicks[], int clickCount, int x, int y, bool isBlack) {
-    // 네 방향: 가로, 세로, 대각선(좌상-우하), 대각선(우상-좌하)
+bool checkWinCondition(const Click clicks[], int clickCount, int x, int y, bool isBlack) {
     int directions[4][2] = { {1, 0}, {0, 1}, {1, 1}, {1, -1} };
 
     for (int d = 0; d < 4; d++) {
         int count = 1;
 
-        // 현재 돌을 기준으로 한 방향으로 WIN_CONDITION만큼 연속된 돌이 있는지 확인
         for (int step = 1; step < WIN_CONDITION; step++) {
             int nx = x + directions[d][0] * step * TILE_SIZE;
             int ny = y + directions[d][1] * step * TILE_SIZE;
+            bool found = false;
             for (int i = 0; i < clickCount; i++) {
                 if (clicks[i].x == nx && clicks[i].y == ny && clicks[i].isBlack == isBlack) {
                     count++;
+                    found = true;
                     break;
                 }
             }
+            if (!found) break;
         }
 
-        // 반대 방향으로도 확인
         for (int step = 1; step < WIN_CONDITION; step++) {
             int nx = x - directions[d][0] * step * TILE_SIZE;
             int ny = y - directions[d][1] * step * TILE_SIZE;
+            bool found = false;
             for (int i = 0; i < clickCount; i++) {
                 if (clicks[i].x == nx && clicks[i].y == ny && clicks[i].isBlack == isBlack) {
                     count++;
+                    found = true;
                     break;
                 }
             }
+            if (!found) break;
         }
 
-        // WIN_CONDITION 이상 연속된 돌이 있으면 승리
         if (count >= WIN_CONDITION) return true;
     }
     return false;
+}
+
+void resetGame(Click clicks[], int* clickCount) {
+    *clickCount = 0;
+    memset(clicks, 0, sizeof(Click) * 64);
+}
+
+void renderButton(SDL_Renderer* renderer, SDL_Texture* buttonTexture, const Button button) {
+    renderTexture(buttonTexture, renderer, button.x, button.y);
+}
+
+bool isButtonClicked(const Button button, int x, int y) {
+    return x > button.x && x < button.x + button.w && y > button.y && y < button.y + button.h;
+}
+
+void renderMenu(SDL_Renderer* renderer, SDL_Texture* backgroundTexture, SDL_Texture* startTexture, SDL_Texture* exitTexture, const Button startButton, const Button exitButton) {
+    renderTexture(backgroundTexture, renderer, 0, 0);
+
+    renderButton(renderer, startTexture, startButton);
+    renderButton(renderer, exitTexture, exitButton);
+}
+
+void renderCloud(SDL_Renderer* renderer, SDL_Texture* cloudTexture, int x, int y) {
+    renderTexture(cloudTexture, renderer, x, y);
+}
+
+void renderBackground(SDL_Renderer* renderer, SDL_Texture* backgroundTexture, float alpha) {
+    SDL_SetTextureAlphaMod(backgroundTexture, (Uint8)(alpha * 255));
+    renderTexture(backgroundTexture, renderer, 0, 0);
 }
 
 int main(int argc, char* argv[]) {
@@ -100,6 +129,28 @@ int main(int argc, char* argv[]) {
     SDL_Event event;
     int clickCount = 0;
     Click clicks[64];
+    bool inGame = false;
+    bool animating = false;
+    float fadeAlpha = 1.0f;
+
+    Button startButton = { WINDOW_WIDTH / 2 - 50, WINDOW_HEIGHT / 2 - 25, 100, 50 };
+    Button exitButton = { WINDOW_WIDTH / 2 - 50, WINDOW_HEIGHT / 2 + 50, 100, 50 };
+
+    SDL_Texture* cloudTexture = loadTexture("C:\\Users\\user\\Desktop\\cloud.png", renderer);
+    SDL_Texture* backgroundTexture = loadTexture("C:\\Users\\user\\Desktop\\background.jpg", renderer);
+
+    SDL_Texture* boardTexture = loadTexture("C:\\Users\\user\\Desktop\\pan.png", renderer);
+    SDL_Texture* blackStoneTexture = loadTexture("C:\\Users\\user\\Desktop\\black.png", renderer);
+    SDL_Texture* whiteStoneTexture = loadTexture("C:\\Users\\user\\Desktop\\white.png", renderer);
+    SDL_Texture* startTexture = loadTexture("C:\\Users\\user\\Desktop\\start.png", renderer);
+    SDL_Texture* exitTexture = loadTexture("C:\\Users\\user\\Desktop\\exit.png", renderer);
+
+    int cloudX[NUM_CLOUDS];
+    int cloudY[NUM_CLOUDS];
+    for (int i = 0; i < NUM_CLOUDS; i++) {
+        cloudX[i] = i * (WINDOW_WIDTH / NUM_CLOUDS);
+        cloudY[i] = WINDOW_HEIGHT / 2 + (rand() % (WINDOW_HEIGHT / 4) - WINDOW_HEIGHT / 6);
+    }
 
     SDL_RenderClear(renderer);
 
@@ -111,86 +162,125 @@ int main(int argc, char* argv[]) {
             else if (event.type == SDL_MOUSEBUTTONDOWN && event.button.button == SDL_BUTTON_LEFT) {
                 int clickX = event.button.x;
                 int clickY = event.button.y;
-                printf("x %d y %d\n", clickX, clickY);
 
-                // 가까운 네 점의 좌표 계산
-                int gridX = (clickX / TILE_SIZE) * TILE_SIZE + TILE_SIZE / 2;
-                int gridY = (clickY / TILE_SIZE) * TILE_SIZE + TILE_SIZE / 2;
-                printf("gridx %d gridy %d\n", gridX + 15, gridY + 19);
-
-                int potentialPoints[4][2] = {
-                    {gridX, gridY},
-                    {gridX - TILE_SIZE, gridY},
-                    {gridX, gridY - TILE_SIZE},
-                    {gridX - TILE_SIZE, gridY - TILE_SIZE}
-                };
-
-                // 가장 가까운 점 찾기
-                double minDist = 99999999;
-                int closestX = gridX, closestY = gridY;
-                for (int i = 0; i < 4; i++) {
-                    int px = potentialPoints[i][0];
-                    int py = potentialPoints[i][1];
-                    double dist = sqrt((px - clickX) * (px - clickX) + (py - clickY) * (py - clickY));
-                    if (dist < minDist) {
-                        minDist = dist;
-                        closestX = px;
-                        closestY = py;
+                if (!inGame && !animating) {
+                    if (isButtonClicked(startButton, clickX, clickY)) {
+                        animating = true;
+                    }
+                    else if (isButtonClicked(exitButton, clickX, clickY)) {
+                        isRunning = false;
                     }
                 }
+                else if (inGame) {
+                    int gridX = (clickX / TILE_SIZE) * TILE_SIZE + TILE_SIZE / 2;
+                    int gridY = (clickY / TILE_SIZE) * TILE_SIZE + TILE_SIZE / 2;
 
-                gridX = closestX;
-                gridY = closestY;
+                    int potentialPoints[4][2] = {
+                        {gridX, gridY},
+                        {gridX - TILE_SIZE, gridY},
+                        {gridX, gridY - TILE_SIZE},
+                        {gridX - TILE_SIZE, gridY - TILE_SIZE}
+                    };
 
-                // 클릭된 위치에 돌이 이미 있는지 확인
-                bool positionOccupied = false;
-                for (int i = 0; i < clickCount; i++) {
-                    if (clicks[i].x == gridX && clicks[i].y == gridY) {
-                        positionOccupied = true;
-                        break;
+                    double minDist = 99999999;
+                    int closestX = gridX, closestY = gridY;
+                    for (int i = 0; i < 4; i++) {
+                        int px = potentialPoints[i][0];
+                        int py = potentialPoints[i][1];
+                        double dist = sqrt((px - clickX) * (px - clickX) + (py - clickY) * (py - clickY));
+                        if (dist < minDist) {
+                            minDist = dist;
+                            closestX = px;
+                            closestY = py;
+                        }
                     }
-                }
 
-                // 빈 위치면 돌을 놓음
-                if (!positionOccupied) {
-                    clicks[clickCount] = (Click){ .x = gridX, .y = gridY, .isBlack = (clickCount % 2 == 0) };
-                    clickCount++;
-                }
-                else {
-                    printf("이미 돌이 있는 위치입니다. 다른 위치를 선택해주세요.\n");
+                    gridX = closestX;
+                    gridY = closestY;
+
+                    bool positionOccupied = false;
+                    for (int i = 0; i < clickCount; i++) {
+                        if (clicks[i].x == gridX && clicks[i].y == gridY) {
+                            positionOccupied = true;
+                            break;
+                        }
+                    }
+
+                    if (!positionOccupied) {
+                        clicks[clickCount] = (Click){ .x = gridX, .y = gridY, .isBlack = (clickCount % 2 == 0) };
+                        clickCount++;
+                    }
+                    else {
+                        printf("이미 돌이 있는 위치입니다. 다른 위치를 선택해주세요.\n");
+                    }
                 }
             }
         }
 
         SDL_RenderClear(renderer);
 
-        renderBoard(renderer);
+        if (!inGame && !animating) {
+            renderMenu(renderer, backgroundTexture, startTexture, exitTexture, startButton, exitButton);
 
-        // 놓인 모든 돌을 렌더링
-        for (int i = 0; i < clickCount; i++) {
-            SDL_Texture* piece = loadTexture(clicks[i].isBlack ? "C:\\Users\\user\\Desktop\\black.png" : "C:\\Users\\user\\Desktop\\white.png", renderer);
-            if (piece) {
-                renderTexture(piece, renderer, clicks[i].x, clicks[i].y);
-                SDL_DestroyTexture(piece);
+            for (int i = 0; i < NUM_CLOUDS; i++) {
+                cloudX[i] += ANIMATION_SPEED;
+                if (cloudX[i] > WINDOW_WIDTH) {
+                    cloudX[i] = -200;
+                }
+                renderCloud(renderer, cloudTexture, cloudX[i], cloudY[i]);
+            }
+        }
+
+        if (animating) {
+            fadeAlpha -= FADE_OUT_SPEED;
+            if (fadeAlpha <= 0.0f) {
+                fadeAlpha = 0.0f;
+                animating = false;
+                inGame = true;
+            }
+            renderBackground(renderer, backgroundTexture, fadeAlpha);
+        }
+
+        if (inGame) {
+            renderBoard(renderer, boardTexture);
+            for (int i = 0; i < clickCount; i++) {
+                SDL_Texture* stoneTexture = clicks[i].isBlack ? blackStoneTexture : whiteStoneTexture;
+                renderTexture(stoneTexture, renderer, clicks[i].x - TILE_SIZE / 2 + 15, clicks[i].y - TILE_SIZE / 2 + 19);
             }
         }
 
         SDL_RenderPresent(renderer);
 
-        // 승리 조건 확인
-        if (clickCount > 0 && checkWinCondition(clicks, clickCount, clicks[clickCount - 1].x, clicks[clickCount - 1].y, clicks[clickCount - 1].isBlack)) {
-            const char* winner = clicks[clickCount - 1].isBlack ? "White" : "Black";
-            char message[50];
-            snprintf(message, sizeof(message), "%s wins!", winner);
-            SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_INFORMATION, "Game Over", message, window);
-            isRunning = false;
+        if (inGame) {
+            for (int i = 0; i < clickCount; i++) {
+                if (checkWinCondition(clicks, clickCount, clicks[i].x, clicks[i].y, clicks[i].isBlack)) {
+                    const char* winner = clicks[i].isBlack ? "White" : "Black";
+                    char message[100];
+                    snprintf(message, sizeof(message), "%s Wins!", winner);
+                    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_INFORMATION, "Game Over", message, window);
+                    resetGame(clicks, &clickCount);
+                    inGame = false;
+                    fadeAlpha = 1.0f;
+                    break;
+                }
+            }
         }
     }
 
+    SDL_DestroyTexture(cloudTexture);
+    SDL_DestroyTexture(backgroundTexture);
+
+    SDL_DestroyTexture(boardTexture);
+    SDL_DestroyTexture(blackStoneTexture);
+    SDL_DestroyTexture(whiteStoneTexture);
+    SDL_DestroyTexture(startTexture);
+    SDL_DestroyTexture(exitTexture);
+
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
-    SDL_Quit();
+
     IMG_Quit();
+    SDL_Quit();
 
     return 0;
 }

@@ -113,7 +113,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>C:\Users\user\Desktop\External_libs\SDL2\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>"C:\Users\user\Downloads\SDL2_ttf-2.22.0\SDL2_ttf-2.22.0";C:\Users\user\Desktop\External_libs\SDL2\include</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
